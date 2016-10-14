@@ -6,6 +6,9 @@ var Pagination = (function () {
 
         this.collection = collection;
         this.settings = new ReactiveDict();
+        this.autorun = new ReactiveVar();
+        this.handle = new ReactiveVar();
+        this.results = new ReactiveVar();
         settings = _.extend(
             {
                 page: 1,
@@ -114,27 +117,41 @@ var Pagination = (function () {
         }
     };
 
+  // getPage does 2 things
+  // 1. sets up a subscription
+  // 2. gets the current dataset from minimongo (data on the client)
     Pagination.prototype.getPage = function() {
         var options = {
-                fields: this.fields(),
-                sort: this.sort(),
-                skip: (this.currentPage() - 1) * this.perPage(),
-                limit: this.perPage()
-            },
-            handle = Meteor.subscribe(
-                this.collection._name,
-                this.filters(),
-                options
-            ),
-            query = {};
-
-        this.ready(handle.ready());
-        if (handle.ready()) {
+            fields: this.fields(),
+            sort: this.sort(),
+            skip: (this.currentPage() - 1) * this.perPage(),
+            limit: this.perPage()
+        };
+        // set this pagination's subscribe handler
+        this.handle.set(Meteor.subscribe(
+            this.collection._name,
+            this.filters(),
+            options
+        ));
+        // set the autorun for this "find"
+        this.autorun = Tracker.autorun(function(c) {
+            var subReady = this.handle.ready();
+            // copy "ready" into settings
+            this.ready(subReady);
+            if (!subReady) return;
+            // get TOTAL Counts
             this.totalItems(Counts.get('sub_count_' + handle.subscriptionId));
-        }
+            // make query
+            var query = {};
+            query['sub_' + handle.subscriptionId] = 1;
+            // get the results and set them into a reactive var
+            this.results.set(
+                this.collection.find(query, {fields: this.fields(), sort: this.sort()}).fetch()
+            );
+        }.bind(this));
 
-        query['sub_' + handle.subscriptionId] = 1;
-        return this.collection.find(query, {fields: this.fields(), sort: this.sort()}).fetch();
+        // return the value of our reactive var
+        return this.results.get();
     };
 
     return Pagination;
